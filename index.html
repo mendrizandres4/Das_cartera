@@ -63,6 +63,13 @@ tr:hover td{background:#f8f9fa}
   <span id="upload-status" style="font-size:.78rem;color:#6C757D;margin-left:1rem"></span>
 </div>
 
+<div class="upload-bar">
+  <label style="font-size:.78rem;font-weight:700;color:#1B3A6B;display:block;margin-bottom:.5rem">💳 Cargar archivo de pagos historicos (.xlsx) — opcional</label>
+  <input type="file" id="fileInputPagos" accept=".xlsx,.xls,.csv" onchange="cargarPagos(event)">
+  <span id="upload-status-pagos" style="font-size:.78rem;color:#6C757D;margin-left:1rem"></span>
+  <div style="font-size:.7rem;color:#6C757D;margin-top:.4rem">Columnas: Nit, Razon Social, Fecha de pago, Valor pagado, Estado</div>
+</div>
+
 <div id="contenido-vacio" class="empty-state">
   <h3 style="color:#1B3A6B;margin-bottom:.5rem">Sin datos cargados</h3>
   <p>Carga tu archivo Excel de cartera arriba para ver el informe completo.</p>
@@ -85,6 +92,7 @@ tr:hover td{background:#f8f9fa}
   <button class="tab active" onclick="showTab('resumen',this)">📋 Resumen</button>
   <button class="tab" onclick="showTab('aging',this)">📊 Aging</button>
   <button class="tab" onclick="showTab('tipo',this)">🏢 Tipo Empresa</button>
+  <button class="tab" onclick="showTab('pagos',this)">💳 Pagos</button>
   <button class="tab" onclick="showTab('detalle',this)">📄 Detalle</button>
 </div>
 
@@ -132,6 +140,27 @@ tr:hover td{background:#f8f9fa}
   </div>
 </div>
 
+<div id="tab-pagos" class="tab-content">
+  <div id="pagos-vacio" style="text-align:center;color:#6C757D;padding:2rem">
+    Carga el archivo de pagos historicos arriba para ver este analisis.
+  </div>
+  <div id="pagos-contenido" style="display:none">
+    <div class="kpi-grid" id="kpi-pagos"></div>
+    <div class="chart-card" style="margin-bottom:1rem"><div id="chart-pagos-mes" style="height:340px"></div></div>
+    <div class="chart-row">
+      <div class="chart-card"><div id="chart-pagos-reg" style="height:340px"></div></div>
+      <div class="chart-card"><div id="chart-pagos-sin" style="height:340px"></div></div>
+    </div>
+    <div class="sec">Cruce Pagos vs Cartera</div>
+    <div class="tbl-wrap"><table id="tbl-cruce"><thead><tr><th>Cliente</th><th>Saldo Cartera</th><th>Pagos Sin Registrar</th><th>Cartera Neta</th><th>Estado</th></tr></thead><tbody></tbody></table></div>
+    <div class="sec">Detalle de Pagos</div>
+    <select id="f-pago-estado" onchange="renderPagos()" style="border:1px solid #dee2e6;border-radius:6px;padding:.35rem .6rem;font-size:.8rem;margin-bottom:.5rem">
+      <option value="">Todos</option><option value="registrado">Registrado</option><option value="sin registrar">Sin registrar</option>
+    </select>
+    <div class="tbl-wrap"><table id="tbl-pagos"><thead><tr><th>Cliente</th><th>Fecha</th><th>Valor</th><th>Estado</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</div>
+
 </div>
 
 <div class="footer">Tablero de Cartera IPS — Informe HTML autocontenido — Uso interno gerencial</div>
@@ -140,6 +169,7 @@ tr:hover td{background:#f8f9fa}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 let DATA_RAW = [];
+let PAGOS_RAW = [];
 let dataFiltrada = [];
 let paginaActual = 0;
 const POR_PAG = 100;
@@ -162,6 +192,28 @@ function badge(txt){
   return `<span class="badge ${cls}">${txt}</span>`;
 }
 
+function normalizarTexto(s){
+  if(!s) return '';
+  return String(s).trim()
+    .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U').replace(/Ñ/g,'N')
+    .replace(/á/g,'a').replace(/é/g,'e').replace(/í/g,'i').replace(/ó/g,'o').replace(/ú/g,'u').replace(/ñ/g,'n');
+}
+
+function encontrarColumna(cols, candidatos){
+  // Busca una columna por coincidencia exacta o normalizada (sin tildes/espacios)
+  for(const cand of candidatos){
+    if(cols.includes(cand)) return cand;
+  }
+  const candidatosNorm = candidatos.map(c => normalizarTexto(c).toLowerCase());
+  for(const col of cols){
+    const colNorm = normalizarTexto(col).toLowerCase();
+    if(candidatosNorm.includes(colNorm)) return col;
+  }
+  return null;
+}
+
+let COL_MAP = {};
+
 function cargarArchivo(event){
   const file = event.target.files[0];
   if(!file) return;
@@ -175,20 +227,67 @@ function cargarArchivo(event){
       const sheet = workbook.Sheets[workbook.SheetNames[0]];
       const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
 
-      // Normalizar columnas requeridas
-      const colsReq = ['Razon Social','Tipo De Empresa','Saldo Actual','Estado de cartera','Intervalo-Actual'];
-      const cols = Object.keys(json[0]||{});
-      const faltantes = colsReq.filter(c => !cols.includes(c));
-
-      if(faltantes.length > 0){
-        document.getElementById('upload-status').innerHTML =
-          '<span style="color:#E63946">Faltan columnas: ' + faltantes.join(', ') + '</span>';
+      if(!json.length){
+        document.getElementById('upload-status').innerHTML = '<span style="color:#E63946">El archivo esta vacio.</span>';
         return;
       }
 
-      DATA_RAW = json.map(r => {
-        r['Saldo Actual'] = parseFloat(String(r['Saldo Actual']).replace(/[^\d.-]/g,'')) || 0;
-        return r;
+      // Limpiar espacios en los nombres de columnas de cada fila
+      const jsonLimpio = json.map(row => {
+        const nuevo = {};
+        Object.keys(row).forEach(k => { nuevo[k.trim()] = row[k]; });
+        return nuevo;
+      });
+
+      const cols = Object.keys(jsonLimpio[0]||{});
+
+      // Mapeo flexible de columnas requeridas (acepta variantes con/sin tilde)
+      COL_MAP = {
+        razon:    encontrarColumna(cols, ['Razon Social','Razón Social']),
+        tipo:     encontrarColumna(cols, ['Tipo De Empresa','Tipo de Empresa']),
+        saldo:    encontrarColumna(cols, ['Saldo Actual']),
+        estado:   encontrarColumna(cols, ['Estado de cartera','Estado De Cartera']),
+        interv:   encontrarColumna(cols, ['Intervalo-Actual','Intervalo Actual']),
+        glosaVal: encontrarColumna(cols, ['Vr,Glosa Reportada','Vr Glosa Reportada']),
+        glosaSal: encontrarColumna(cols, ['Saldo de Glosa según cartera','Saldo de Glosa segun cartera']),
+        glosaEst: encontrarColumna(cols, ['Estado De Glosa','Estado de Glosa']),
+        vencida:  encontrarColumna(cols, ['Factura vencida']),
+        porVencer:encontrarColumna(cols, ['Por vencer']),
+        juridico: encontrarColumna(cols, ['Estado juridico','Estado jurídico']),
+        nit:      encontrarColumna(cols, ['Nuevo Nit']),
+      };
+
+      const faltantes = [];
+      if(!COL_MAP.razon)  faltantes.push('Razon Social');
+      if(!COL_MAP.tipo)   faltantes.push('Tipo De Empresa');
+      if(!COL_MAP.saldo)  faltantes.push('Saldo Actual');
+      if(!COL_MAP.estado) faltantes.push('Estado de cartera');
+      if(!COL_MAP.interv) faltantes.push('Intervalo-Actual');
+
+      if(faltantes.length > 0){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">Faltan columnas: ' + faltantes.join(', ') + '</span><br>' +
+          '<span style="font-size:.7rem;color:#6C757D">Columnas detectadas en tu archivo: ' + cols.join(', ') + '</span>';
+        return;
+      }
+
+      // Normalizar registros usando el mapeo de columnas encontrado
+      DATA_RAW = jsonLimpio.map(r => {
+        const out = {
+          'Razon Social': r[COL_MAP.razon],
+          'Tipo De Empresa': r[COL_MAP.tipo],
+          'Estado de cartera': r[COL_MAP.estado],
+          'Intervalo-Actual': r[COL_MAP.interv],
+          'Saldo Actual': parseFloat(String(r[COL_MAP.saldo]).replace(/[^\d.-]/g,'')) || 0,
+        };
+        if(COL_MAP.glosaVal) out['Vr,Glosa Reportada'] = parseFloat(String(r[COL_MAP.glosaVal]).replace(/[^\d.-]/g,'')) || 0;
+        if(COL_MAP.glosaSal) out['Saldo de Glosa según cartera'] = parseFloat(String(r[COL_MAP.glosaSal]).replace(/[^\d.-]/g,'')) || 0;
+        if(COL_MAP.glosaEst) out['Estado De Glosa'] = r[COL_MAP.glosaEst];
+        if(COL_MAP.vencida)  out['Factura vencida'] = parseFloat(String(r[COL_MAP.vencida]).replace(/[^\d.-]/g,'')) || 0;
+        if(COL_MAP.porVencer) out['Por vencer'] = parseFloat(String(r[COL_MAP.porVencer]).replace(/[^\d.-]/g,'')) || 0;
+        if(COL_MAP.juridico) out['Estado juridico'] = r[COL_MAP.juridico];
+        if(COL_MAP.nit) out['Nit'] = String(r[COL_MAP.nit]).trim();
+        return out;
       });
 
       document.getElementById('upload-status').innerHTML =
@@ -202,6 +301,63 @@ function cargarArchivo(event){
     } catch(err){
       document.getElementById('upload-status').innerHTML =
         '<span style="color:#E63946">Error al leer el archivo: ' + err.message + '</span>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function cargarPagos(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  document.getElementById('upload-status-pagos').textContent = 'Procesando ' + file.name + '...';
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:'array'});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
+
+      if(!json.length){
+        document.getElementById('upload-status-pagos').innerHTML = '<span style="color:#E63946">Archivo vacio.</span>';
+        return;
+      }
+
+      const jsonLimpio = json.map(row => {
+        const nuevo = {};
+        Object.keys(row).forEach(k => { nuevo[k.trim()] = row[k]; });
+        return nuevo;
+      });
+      const cols = Object.keys(jsonLimpio[0]||{});
+
+      const colNit    = cols.find(c => normalizarTexto(c).toLowerCase().includes('nit') && !normalizarTexto(c).toLowerCase().includes('razon'));
+      const colRazon  = cols.find(c => normalizarTexto(c).toLowerCase().includes('razon') || normalizarTexto(c).toLowerCase().includes('social'));
+      const colFecha  = cols.find(c => normalizarTexto(c).toLowerCase().includes('fecha'));
+      const colValor  = cols.find(c => ['valor','pago','monto'].some(x => normalizarTexto(c).toLowerCase().includes(x)));
+      const colEstado = cols.find(c => normalizarTexto(c).toLowerCase().includes('estado'));
+
+      if(!colNit || !colRazon || !colValor || !colEstado){
+        document.getElementById('upload-status-pagos').innerHTML =
+          '<span style="color:#E63946">No se encontraron las columnas necesarias (Nit, Razon Social, Valor pagado, Estado).</span>';
+        return;
+      }
+
+      PAGOS_RAW = jsonLimpio.map(r => ({
+        'Nit': String(r[colNit]).trim(),
+        'Razon Social': r[colRazon],
+        'Fecha': colFecha ? String(r[colFecha]) : '',
+        'Valor': parseFloat(String(r[colValor]).replace(/[^\d.-]/g,'')) || 0,
+        'Estado': String(r[colEstado]).trim(),
+      }));
+
+      document.getElementById('upload-status-pagos').innerHTML =
+        '<span style="color:#2D9B6F">' + PAGOS_RAW.length.toLocaleString() + ' pagos cargados correctamente</span>';
+
+      renderTodo();
+    } catch(err){
+      document.getElementById('upload-status-pagos').innerHTML =
+        '<span style="color:#E63946">Error: ' + err.message + '</span>';
     }
   };
   reader.readAsArrayBuffer(file);
@@ -341,11 +497,86 @@ function cambiarPag(dir){
   renderDetalle();
 }
 
+function renderPagos(){
+  if(!PAGOS_RAW.length){
+    document.getElementById('pagos-vacio').style.display = 'block';
+    document.getElementById('pagos-contenido').style.display = 'none';
+    return;
+  }
+  document.getElementById('pagos-vacio').style.display = 'none';
+  document.getElementById('pagos-contenido').style.display = 'block';
+
+  const ef = document.getElementById('f-pago-estado').value;
+  const pf = ef ? PAGOS_RAW.filter(p => p.Estado.toLowerCase() == ef) : PAGOS_RAW;
+  const reg = PAGOS_RAW.filter(p => p.Estado.toLowerCase() == 'registrado');
+  const sin = PAGOS_RAW.filter(p => p.Estado.toLowerCase() == 'sin registrar');
+  const tp = PAGOS_RAW.reduce((s,p) => s + (parseFloat(p.Valor)||0), 0);
+  const tr = reg.reduce((s,p) => s + (parseFloat(p.Valor)||0), 0);
+  const ts = sin.reduce((s,p) => s + (parseFloat(p.Valor)||0), 0);
+
+  document.getElementById('kpi-pagos').innerHTML = `
+    <div class="kpi"><div class="kpi-label">Total Pagos</div><div class="kpi-value">${fmt(tp)}</div><div class="kpi-sub">${PAGOS_RAW.length.toLocaleString()} registros</div></div>
+    <div class="kpi s"><div class="kpi-label">Registrados</div><div class="kpi-value">${fmt(tr)}</div><div class="kpi-sub">${reg.length.toLocaleString()} aplicados</div></div>
+    <div class="kpi d"><div class="kpi-label">Recaudo por Aplicar</div><div class="kpi-value">${fmt(ts)}</div><div class="kpi-sub">${sin.length.toLocaleString()} pendientes</div></div>
+    <div class="kpi"><div class="kpi-label">% Aplicado</div><div class="kpi-value">${fmtPct(tr/tp*100)}</div></div>
+  `;
+
+  // Evolucion mensual
+  const mensual = {};
+  PAGOS_RAW.forEach(p => {
+    if(!p.Fecha) return;
+    const f = new Date(p.Fecha);
+    if(isNaN(f.getTime())) return;
+    const k = f.getFullYear() + '-' + String(f.getMonth()+1).padStart(2,'0');
+    const key = k + '|' + p.Estado;
+    mensual[key] = (mensual[key]||0) + (parseFloat(p.Valor)||0);
+  });
+  const meses = [...new Set(Object.keys(mensual).map(k=>k.split('|')[0]))].sort();
+  Plotly.newPlot('chart-pagos-mes',[
+    {name:'Registrado',x:meses,y:meses.map(m=>mensual[m+'|Registrado']||0),type:'bar',marker:{color:'#2D9B6F'}},
+    {name:'Sin registrar',x:meses,y:meses.map(m=>mensual[m+'|Sin registrar']||0),type:'bar',marker:{color:'#E63946'}}
+  ],{barmode:'group',height:320,margin:{t:20,b:60,l:10,r:10},paper_bgcolor:'white',plot_bgcolor:'white'},{responsive:true});
+
+  // Top registrados / sin registrar
+  const trTop={}, tsTop={};
+  reg.forEach(p=>{trTop[p['Razon Social']]=(trTop[p['Razon Social']]||0)+(parseFloat(p.Valor)||0);});
+  sin.forEach(p=>{tsTop[p['Razon Social']]=(tsTop[p['Razon Social']]||0)+(parseFloat(p.Valor)||0);});
+  const tr10=Object.entries(trTop).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  const ts10=Object.entries(tsTop).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  Plotly.newPlot('chart-pagos-reg',[{x:tr10.map(e=>e[1]),y:tr10.map(e=>e[0]),type:'bar',orientation:'h',marker:{color:'#2D9B6F'},text:tr10.map(e=>fmt(e[1])),textposition:'outside'}],
+    {height:340,margin:{t:20,b:10,l:10,r:130},paper_bgcolor:'white',plot_bgcolor:'white',yaxis:{categoryorder:'array',categoryarray:tr10.map(e=>e[0]).reverse()}},{responsive:true});
+  Plotly.newPlot('chart-pagos-sin',[{x:ts10.map(e=>e[1]),y:ts10.map(e=>e[0]),type:'bar',orientation:'h',marker:{color:'#E63946'},text:ts10.map(e=>fmt(e[1])),textposition:'outside'}],
+    {height:340,margin:{t:20,b:10,l:10,r:130},paper_bgcolor:'white',plot_bgcolor:'white',yaxis:{categoryorder:'array',categoryarray:ts10.map(e=>e[0]).reverse()}},{responsive:true});
+
+  // Cruce pagos vs cartera
+  if(DATA_RAW.length && DATA_RAW[0]['Nit'] !== undefined){
+    const sn={};
+    DATA_RAW.forEach(r=>{const n=r['Nit'];if(n){sn[n]=sn[n]||{saldo:0,nombre:r['Razon Social']};sn[n].saldo+=(parseFloat(r['Saldo Actual'])||0);}});
+    const sinNit={};
+    sin.forEach(p=>{sinNit[p.Nit]=(sinNit[p.Nit]||0)+(parseFloat(p.Valor)||0);});
+    const cruce=Object.keys(sn).map(nit=>{
+      const saldoCartera=sn[nit].saldo;
+      const sinReg=sinNit[nit]||0;
+      const neta=saldoCartera-sinReg;
+      return {cliente:sn[nit].nombre,saldoCartera,sinReg,neta,
+        estado: neta>0?'Pendiente':(neta==0?'Al dia':'Sobrepago')};
+    }).sort((a,b)=>b.saldoCartera-a.saldoCartera).slice(0,50);
+    document.querySelector('#tbl-cruce tbody').innerHTML=cruce.map(c=>
+      `<tr><td>${c.cliente}</td><td>${fmt(c.saldoCartera)}</td><td>${fmt(c.sinReg)}</td><td>${fmt(c.neta)}</td><td>${badge(c.estado)}</td></tr>`).join('');
+  } else {
+    document.querySelector('#tbl-cruce tbody').innerHTML = '<tr><td colspan="5" style="text-align:center;color:#6C757D">Se requiere columna Nuevo Nit en el archivo de cartera para el cruce</td></tr>';
+  }
+
+  document.querySelector('#tbl-pagos tbody').innerHTML=pf.slice(0,200).map(p=>
+    `<tr><td>${p['Razon Social']}</td><td>${p.Fecha}</td><td>${fmt(p.Valor)}</td><td>${badge(p.Estado)}</td></tr>`).join('');
+}
+
 function renderTodo(){
   renderResumen();
   renderAging();
   renderTipo();
   renderDetalle();
+  renderPagos();
 }
 </script>
 </body>
