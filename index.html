@@ -254,26 +254,38 @@ function cargarArchivo(event){
         return;
       }
 
+      document.getElementById('upload-status').innerHTML =
+        'Archivo leido: ' + workbook.SheetNames.length + ' hoja(s) encontrada(s) (' + workbook.SheetNames.join(', ') + '). Buscando datos...';
+
       // Buscar la hoja con mas datos, no solo la primera
       let mejorHoja = workbook.SheetNames[0];
       let mejorConteo = 0;
       workbook.SheetNames.forEach(nombreHoja => {
-        const ref = workbook.Sheets[nombreHoja]['!ref'];
-        if(ref){
-          const range = XLSX.utils.decode_range(ref);
+        const hojaActual = workbook.Sheets[nombreHoja];
+        if(!hojaActual || !hojaActual['!ref']) return;
+        try {
+          const range = XLSX.utils.decode_range(hojaActual['!ref']);
           const filas = range.e.r - range.s.r;
           if(filas > mejorConteo){
             mejorConteo = filas;
             mejorHoja = nombreHoja;
           }
+        } catch(rangeErr){
+          // Hoja con rango invalido, se omite
         }
       });
 
       const sheet = workbook.Sheets[mejorHoja];
 
-      if(!sheet || !sheet['!ref']){
+      if(!sheet){
         document.getElementById('upload-status').innerHTML =
-          '<span style="color:#E63946">La hoja "' + mejorHoja + '" esta vacia o no tiene rango de datos definido.</span>';
+          '<span style="color:#E63946">No se pudo acceder a la hoja "' + mejorHoja + '". Hojas disponibles: ' + workbook.SheetNames.join(', ') + '</span>';
+        return;
+      }
+
+      if(!sheet['!ref']){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">La hoja "' + mejorHoja + '" no tiene rango de datos (!ref). Puede estar completamente vacia o protegida.</span>';
         return;
       }
 
