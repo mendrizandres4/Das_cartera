@@ -217,20 +217,77 @@ let COL_MAP = {};
 function cargarArchivo(event){
   const file = event.target.files[0];
   if(!file) return;
-  document.getElementById('upload-status').textContent = 'Procesando ' + file.name + '...';
+
+  const sizeMB = (file.size / 1024 / 1024).toFixed(1);
+  document.getElementById('upload-status').innerHTML =
+    'Procesando ' + file.name + ' (' + sizeMB + ' MB)... esto puede tardar unos segundos para archivos grandes.';
 
   const reader = new FileReader();
+
+  reader.onerror = function(){
+    document.getElementById('upload-status').innerHTML =
+      '<span style="color:#E63946">Error al leer el archivo (FileReader). Intenta con un archivo mas pequeno o en formato .csv.</span>';
+  };
+
   reader.onload = function(e){
     try {
       const data = new Uint8Array(e.target.result);
-      const workbook = XLSX.read(data, {type:'array'});
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
 
-      if(!json.length){
-        document.getElementById('upload-status').innerHTML = '<span style="color:#E63946">El archivo esta vacio.</span>';
+      if(!data || data.length === 0){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">El archivo se leyo pero no contiene datos binarios (0 bytes). Verifica que no este danado.</span>';
         return;
       }
+
+      let workbook;
+      try {
+        workbook = XLSX.read(data, {type:'array', cellDates:false, sheetStubs:false});
+      } catch(parseErr){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">No se pudo interpretar el archivo como Excel: ' + parseErr.message + '</span>';
+        return;
+      }
+
+      if(!workbook.SheetNames || workbook.SheetNames.length === 0){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">El archivo Excel no tiene hojas detectables.</span>';
+        return;
+      }
+
+      // Buscar la hoja con mas datos, no solo la primera
+      let mejorHoja = workbook.SheetNames[0];
+      let mejorConteo = 0;
+      workbook.SheetNames.forEach(nombreHoja => {
+        const ref = workbook.Sheets[nombreHoja]['!ref'];
+        if(ref){
+          const range = XLSX.utils.decode_range(ref);
+          const filas = range.e.r - range.s.r;
+          if(filas > mejorConteo){
+            mejorConteo = filas;
+            mejorHoja = nombreHoja;
+          }
+        }
+      });
+
+      const sheet = workbook.Sheets[mejorHoja];
+
+      if(!sheet || !sheet['!ref']){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">La hoja "' + mejorHoja + '" esta vacia o no tiene rango de datos definido.</span>';
+        return;
+      }
+
+      const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
+
+      if(!json || json.length === 0){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">Se detecto la hoja "' + mejorHoja + '" con rango ' + sheet['!ref'] + ' pero no se extrajeron filas. ' +
+          'Puede que los encabezados no esten en la fila 1 de esta hoja, o que el formato sea incompatible.</span>';
+        return;
+      }
+
+      document.getElementById('upload-status').innerHTML =
+        'Hoja "' + mejorHoja + '" detectada con ' + json.length.toLocaleString() + ' filas. Validando columnas...';
 
       // Limpiar espacios en los nombres de columnas de cada fila
       const jsonLimpio = json.map(row => {
@@ -241,7 +298,6 @@ function cargarArchivo(event){
 
       const cols = Object.keys(jsonLimpio[0]||{});
 
-      // Mapeo flexible de columnas requeridas (acepta variantes con/sin tilde)
       COL_MAP = {
         razon:    encontrarColumna(cols, ['Razon Social','Razón Social']),
         tipo:     encontrarColumna(cols, ['Tipo De Empresa','Tipo de Empresa']),
@@ -267,11 +323,10 @@ function cargarArchivo(event){
       if(faltantes.length > 0){
         document.getElementById('upload-status').innerHTML =
           '<span style="color:#E63946">Faltan columnas: ' + faltantes.join(', ') + '</span><br>' +
-          '<span style="font-size:.7rem;color:#6C757D">Columnas detectadas en tu archivo: ' + cols.join(', ') + '</span>';
+          '<span style="font-size:.7rem;color:#6C757D">Hoja usada: "' + mejorHoja + '" | Columnas detectadas (' + cols.length + '): ' + cols.join(', ') + '</span>';
         return;
       }
 
-      // Normalizar registros usando el mapeo de columnas encontrado
       DATA_RAW = jsonLimpio.map(r => {
         const out = {
           'Razon Social': r[COL_MAP.razon],
@@ -291,7 +346,7 @@ function cargarArchivo(event){
       });
 
       document.getElementById('upload-status').innerHTML =
-        '<span style="color:#2D9B6F">' + DATA_RAW.length.toLocaleString() + ' registros cargados correctamente</span>';
+        '<span style="color:#2D9B6F">' + DATA_RAW.length.toLocaleString() + ' registros cargados correctamente desde la hoja "' + mejorHoja + '"</span>';
       document.getElementById('contenido-vacio').style.display = 'none';
       document.getElementById('contenido-principal').style.display = 'block';
 
@@ -300,9 +355,11 @@ function cargarArchivo(event){
       renderTodo();
     } catch(err){
       document.getElementById('upload-status').innerHTML =
-        '<span style="color:#E63946">Error al leer el archivo: ' + err.message + '</span>';
+        '<span style="color:#E63946">Error inesperado al procesar: ' + err.message + '</span>';
+      console.error(err);
     }
   };
+
   reader.readAsArrayBuffer(file);
 }
 
