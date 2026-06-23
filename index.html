@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Informe Cartera IPS</title>
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.27.0/plotly.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;background:#F0F2F6;color:#333;font-size:13px}
+.hdr{background:linear-gradient(135deg,#1B3A6B,#2E86AB);padding:1.2rem 2rem;color:white;margin-bottom:1rem}
+.hdr h1{font-size:1.5rem;font-weight:700;margin:0}
+.hdr p{opacity:.85;margin:.3rem 0 0;font-size:.85rem}
+.container{max-width:1400px;margin:0 auto;padding:0 1rem 2rem}
+.filtros-bar{background:white;border-radius:10px;padding:.8rem 1rem;margin-bottom:1rem;box-shadow:0 2px 6px rgba(0,0,0,.07);display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.filtros-bar label{font-size:.75rem;font-weight:700;color:#6C757D;text-transform:uppercase}
+.filtros-bar select{border:1px solid #dee2e6;border-radius:6px;padding:.35rem .6rem;font-size:.8rem;color:#333;background:white;cursor:pointer}
+.filtros-bar button{background:#1B3A6B;color:white;border:none;border-radius:6px;padding:.38rem .9rem;font-size:.8rem;cursor:pointer;font-weight:700}
+.filtros-bar button.reset{background:#6C757D}
+.upload-bar{background:white;border-radius:10px;padding:1rem;margin-bottom:1rem;box-shadow:0 2px 6px rgba(0,0,0,.07)}
+.upload-bar input[type=file]{font-size:.8rem}
+.tabs{display:flex;gap:4px;margin-bottom:1rem;flex-wrap:wrap}
+.tab{padding:.5rem 1rem;border-radius:8px 8px 0 0;cursor:pointer;font-size:.82rem;font-weight:700;background:#dee2e6;color:#6C757D;border:none;transition:all .2s}
+.tab.active{background:#1B3A6B;color:white}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:1rem}
+.kpi{background:white;border-radius:10px;padding:.9rem 1rem;border-left:5px solid #2E86AB;box-shadow:0 2px 6px rgba(0,0,0,.07)}
+.kpi.d{border-left-color:#E63946}.kpi.w{border-left-color:#F4A261}.kpi.s{border-left-color:#2D9B6F}.kpi.o{border-left-color:#E76F51}
+.kpi-label{font-size:.68rem;font-weight:700;color:#6C757D;text-transform:uppercase;letter-spacing:.05em;margin-bottom:.25rem}
+.kpi-value{font-size:1.15rem;font-weight:700;color:#1B3A6B;line-height:1.2}
+.kpi-sub{font-size:.68rem;color:#6C757D;margin-top:.15rem}
+.sec{font-size:.95rem;font-weight:700;color:#1B3A6B;border-bottom:2px solid #2E86AB;padding-bottom:.3rem;margin:1.2rem 0 .8rem}
+.narr{background:white;border-left:4px solid #2E86AB;border-radius:0 10px 10px 0;padding:.9rem 1rem;font-size:.83rem;line-height:1.7;margin-bottom:1rem;box-shadow:0 2px 4px rgba(0,0,0,.05)}
+.alert{border-radius:8px;padding:.65rem .9rem;margin-bottom:.45rem;font-size:.8rem;display:flex;gap:.5rem;align-items:flex-start}
+.alert.danger{background:#FEF0F0;border-left:4px solid #E63946;color:#7B1D1D}
+.alert.warning{background:#FFF8EC;border-left:4px solid #F4A261;color:#7A4A00}
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:1rem}
+.chart-card{background:white;border-radius:10px;padding:1rem;box-shadow:0 2px 6px rgba(0,0,0,.07)}
+.tbl-wrap{overflow-x:auto;background:white;border-radius:10px;box-shadow:0 2px 6px rgba(0,0,0,.07);margin-bottom:1rem}
+table{width:100%;border-collapse:collapse;font-size:.78rem}
+th{background:#1B3A6B;color:white;padding:.5rem .7rem;text-align:left;font-weight:700;white-space:nowrap}
+td{padding:.42rem .7rem;border-bottom:.5px solid #dee2e6;white-space:nowrap}
+tr:hover td{background:#f8f9fa}
+.badge{display:inline-block;padding:2px 7px;border-radius:20px;font-size:.7rem;font-weight:700}
+.badge.r{background:#FEF0F0;color:#9B2335}.badge.o{background:#FFF8EC;color:#854F0B}
+.badge.g{background:#EDFDF6;color:#085041}.badge.b{background:#E6F1FB;color:#0C447C}
+.footer{text-align:center;font-size:.72rem;color:#6C757D;margin-top:2rem;padding-top:1rem;border-top:1px solid #dee2e6}
+.empty-state{background:white;border-radius:10px;padding:3rem 2rem;text-align:center;color:#6C757D}
+@media(max-width:700px){.chart-row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <h1>🏥 Tablero de Cartera - IPS</h1>
+  <p>Clinica Mar Caribe / COLSALUD | Informe interactivo | Carga tu archivo Excel de cartera para comenzar</p>
+</div>
+<div class="container">
+
+<div class="upload-bar">
+  <label style="font-size:.78rem;font-weight:700;color:#1B3A6B;display:block;margin-bottom:.5rem">📂 Cargar archivo de cartera (.xlsx o .csv)</label>
+  <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" onchange="cargarArchivo(event)">
+  <span id="upload-status" style="font-size:.78rem;color:#6C757D;margin-left:1rem"></span>
+</div>
+
+<div id="contenido-vacio" class="empty-state">
+  <h3 style="color:#1B3A6B;margin-bottom:.5rem">Sin datos cargados</h3>
+  <p>Carga tu archivo Excel de cartera arriba para ver el informe completo.</p>
+  <p style="margin-top:.8rem;font-size:.75rem">Columnas requeridas: Razon Social, Tipo De Empresa, Saldo Actual, Estado de cartera, Intervalo-Actual</p>
+</div>
+
+<div id="contenido-principal" style="display:none">
+
+<div class="filtros-bar">
+  <label>Filtros:</label>
+  <select id="f-estado"><option value="">Todos los estados</option></select>
+  <select id="f-tipo"><option value="">Todos los tipos</option></select>
+  <select id="f-intervalo"><option value="">Todos los intervalos</option></select>
+  <button onclick="aplicarFiltros()">Aplicar</button>
+  <button class="reset" onclick="resetFiltros()">Limpiar</button>
+  <span id="filtro-info" style="font-size:.75rem;color:#6C757D;margin-left:.5rem"></span>
+</div>
+
+<div class="tabs">
+  <button class="tab active" onclick="showTab('resumen',this)">📋 Resumen</button>
+  <button class="tab" onclick="showTab('aging',this)">📊 Aging</button>
+  <button class="tab" onclick="showTab('tipo',this)">🏢 Tipo Empresa</button>
+  <button class="tab" onclick="showTab('detalle',this)">📄 Detalle</button>
+</div>
+
+<div id="tab-resumen" class="tab-content active">
+  <div class="narr" id="narr-text"></div>
+  <div class="sec">Indicadores Financieros Clave</div>
+  <div class="kpi-grid" id="kpi-container"></div>
+  <div class="sec">Composicion por Estado</div>
+  <div class="chart-row">
+    <div class="chart-card"><div id="chart-estado" style="height:320px"></div></div>
+    <div class="chart-card"><div id="chart-estado-pie" style="height:320px"></div></div>
+  </div>
+  <div class="sec">Top 10 Deudores</div>
+  <div class="tbl-wrap"><table id="tbl-top10"><thead><tr><th>#</th><th>Cliente</th><th>Saldo</th><th>% Part.</th><th>Estado</th></tr></thead><tbody></tbody></table></div>
+  <div class="sec">Alertas</div>
+  <div id="alertas-container"></div>
+</div>
+
+<div id="tab-aging" class="tab-content">
+  <div class="chart-card" style="margin-bottom:1rem"><div id="chart-aging" style="height:420px"></div></div>
+  <div class="tbl-wrap"><table id="tbl-aging"><thead><tr><th>Intervalo</th><th>Saldo</th><th>% Part.</th><th>Facturas</th></tr></thead><tbody></tbody></table></div>
+</div>
+
+<div id="tab-tipo" class="tab-content">
+  <div class="chart-row">
+    <div class="chart-card"><div id="chart-tipo-bar" style="height:360px"></div></div>
+    <div class="chart-card"><div id="chart-tipo-pie" style="height:360px"></div></div>
+  </div>
+  <div class="tbl-wrap"><table id="tbl-tipo"><thead><tr><th>Tipo de Empresa</th><th>Saldo</th><th>% Part.</th><th>Clientes</th></tr></thead><tbody></tbody></table></div>
+</div>
+
+<div id="tab-detalle" class="tab-content">
+  <input type="text" id="buscador" placeholder="Buscar cliente, estado, intervalo..." oninput="renderDetalle()"
+    style="border:1px solid #dee2e6;border-radius:6px;padding:.35rem .7rem;font-size:.8rem;width:280px;margin-bottom:.5rem">
+  <div class="tbl-wrap">
+    <table id="tbl-detalle">
+      <thead><tr><th>Cliente</th><th>Tipo</th><th>Estado</th><th>Intervalo</th><th>Saldo</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+  <div style="margin-top:.5rem;font-size:.78rem;color:#6C757D;display:flex;gap:8px;align-items:center">
+    <button onclick="cambiarPag(-1)" style="border:1px solid #dee2e6;border-radius:4px;padding:2px 8px;cursor:pointer;background:white">Anterior</button>
+    <span id="pag-info"></span>
+    <button onclick="cambiarPag(1)" style="border:1px solid #dee2e6;border-radius:4px;padding:2px 8px;cursor:pointer;background:white">Siguiente</button>
+  </div>
+</div>
+
+</div>
+
+<div class="footer">Tablero de Cartera IPS — Informe HTML autocontenido — Uso interno gerencial</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+let DATA_RAW = [];
+let dataFiltrada = [];
+let paginaActual = 0;
+const POR_PAG = 100;
+
+const fmt = v => {
+  if(!v && v!==0) return '-';
+  const n = parseFloat(v);
+  if(isNaN(n)) return v;
+  return '$' + Math.round(n).toLocaleString('es-CO');
+};
+const fmtPct = v => parseFloat(v).toFixed(1)+'%';
+
+function badge(txt){
+  if(!txt||txt=='-') return '-';
+  const t=txt.toLowerCase();
+  let cls='b';
+  if(t.includes('cobro')) cls='r';
+  else if(t.includes('liquidaci')) cls='o';
+  else if(t.includes('conciliada')||t.includes('normal')) cls='g';
+  return `<span class="badge ${cls}">${txt}</span>`;
+}
+
+function cargarArchivo(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  document.getElementById('upload-status').textContent = 'Procesando ' + file.name + '...';
+
+  const reader = new FileReader();
+  reader.onload = function(e){
+    try {
+      const data = new Uint8Array(e.target.result);
+      const workbook = XLSX.read(data, {type:'array'});
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
+
+      // Normalizar columnas requeridas
+      const colsReq = ['Razon Social','Tipo De Empresa','Saldo Actual','Estado de cartera','Intervalo-Actual'];
+      const cols = Object.keys(json[0]||{});
+      const faltantes = colsReq.filter(c => !cols.includes(c));
+
+      if(faltantes.length > 0){
+        document.getElementById('upload-status').innerHTML =
+          '<span style="color:#E63946">Faltan columnas: ' + faltantes.join(', ') + '</span>';
+        return;
+      }
+
+      DATA_RAW = json.map(r => {
+        r['Saldo Actual'] = parseFloat(String(r['Saldo Actual']).replace(/[^\d.-]/g,'')) || 0;
+        return r;
+      });
+
+      document.getElementById('upload-status').innerHTML =
+        '<span style="color:#2D9B6F">' + DATA_RAW.length.toLocaleString() + ' registros cargados correctamente</span>';
+      document.getElementById('contenido-vacio').style.display = 'none';
+      document.getElementById('contenido-principal').style.display = 'block';
+
+      dataFiltrada = [...DATA_RAW];
+      poblarFiltros();
+      renderTodo();
+    } catch(err){
+      document.getElementById('upload-status').innerHTML =
+        '<span style="color:#E63946">Error al leer el archivo: ' + err.message + '</span>';
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function poblarFiltros(){
+  const estados = [...new Set(DATA_RAW.map(r=>r['Estado de cartera']).filter(Boolean))].sort();
+  const tipos = [...new Set(DATA_RAW.map(r=>r['Tipo De Empresa']).filter(Boolean))].sort();
+  const intervalos = [...new Set(DATA_RAW.map(r=>r['Intervalo-Actual']).filter(Boolean))].sort();
+
+  const se=document.getElementById('f-estado');
+  const st=document.getElementById('f-tipo');
+  const si=document.getElementById('f-intervalo');
+  se.innerHTML='<option value="">Todos los estados</option>';
+  st.innerHTML='<option value="">Todos los tipos</option>';
+  si.innerHTML='<option value="">Todos los intervalos</option>';
+  estados.forEach(e=>{const o=document.createElement('option');o.value=e;o.textContent=e;se.appendChild(o);});
+  tipos.forEach(e=>{const o=document.createElement('option');o.value=e;o.textContent=e;st.appendChild(o);});
+  intervalos.forEach(e=>{const o=document.createElement('option');o.value=e;o.textContent=e;si.appendChild(o);});
+}
+
+function aplicarFiltros(){
+  const fe=document.getElementById('f-estado').value;
+  const ft=document.getElementById('f-tipo').value;
+  const fi=document.getElementById('f-intervalo').value;
+  dataFiltrada=DATA_RAW.filter(r=>
+    (!fe||r['Estado de cartera']==fe)&&
+    (!ft||r['Tipo De Empresa']==ft)&&
+    (!fi||r['Intervalo-Actual']==fi)
+  );
+  paginaActual=0;
+  document.getElementById('filtro-info').textContent=
+    dataFiltrada.length<DATA_RAW.length?`Mostrando ${dataFiltrada.length.toLocaleString()} de ${DATA_RAW.length.toLocaleString()}`:'';
+  renderTodo();
+}
+
+function resetFiltros(){
+  document.getElementById('f-estado').value='';
+  document.getElementById('f-tipo').value='';
+  document.getElementById('f-intervalo').value='';
+  dataFiltrada=[...DATA_RAW];
+  paginaActual=0;
+  document.getElementById('filtro-info').textContent='';
+  renderTodo();
+}
+
+function showTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function renderResumen(){
+  const total=dataFiltrada.reduce((s,r)=>s+(parseFloat(r['Saldo Actual'])||0),0);
+  const cobro=dataFiltrada.filter(r=>r['Estado de cartera']=='Para cobro').reduce((s,r)=>s+(parseFloat(r['Saldo Actual'])||0),0);
+  const liq=dataFiltrada.filter(r=>(r['Estado de cartera']||'').toLowerCase().includes('liquidaci')).reduce((s,r)=>s+(parseFloat(r['Saldo Actual'])||0),0);
+  const nCli=new Set(dataFiltrada.map(r=>r['Razon Social'])).size;
+
+  document.getElementById('narr-text').innerHTML=
+    `Cartera total: <strong>${fmt(total)}</strong> | ${nCli} clientes<br><br>
+    Para cobro: <strong>${fmtPct(cobro/total*100)}</strong> (${fmt(cobro)}) | En liquidacion: <strong>${fmtPct(liq/total*100)}</strong>`;
+
+  document.getElementById('kpi-container').innerHTML=`
+    <div class="kpi"><div class="kpi-label">Cartera Total</div><div class="kpi-value">${fmt(total)}</div><div class="kpi-sub">${nCli} clientes</div></div>
+    <div class="kpi d"><div class="kpi-label">En Cobro</div><div class="kpi-value">${fmt(cobro)}</div><div class="kpi-sub">${fmtPct(cobro/total*100)}</div></div>
+    <div class="kpi o"><div class="kpi-label">En Liquidacion</div><div class="kpi-value">${fmt(liq)}</div></div>
+    <div class="kpi"><div class="kpi-label">Registros</div><div class="kpi-value">${dataFiltrada.length.toLocaleString()}</div></div>
+  `;
+
+  const est={};
+  dataFiltrada.forEach(r=>{const k=r['Estado de cartera']||'Sin estado';est[k]=(est[k]||0)+(parseFloat(r['Saldo Actual'])||0);});
+  const estK=Object.keys(est).sort((a,b)=>est[b]-est[a]);
+  const estV=estK.map(k=>est[k]);
+  const estC=estK.map(k=>k=='Para cobro'?'#E63946':k.toLowerCase().includes('liquidaci')?'#E76F51':'#2E86AB');
+  Plotly.newPlot('chart-estado',[{x:estK,y:estV,type:'bar',marker:{color:estC},text:estV.map(fmt),textposition:'outside'}],
+    {height:300,margin:{t:20,b:80,l:10,r:10},xaxis:{tickangle:-30},paper_bgcolor:'white',plot_bgcolor:'white'},{responsive:true});
+  Plotly.newPlot('chart-estado-pie',[{labels:estK,values:estV,type:'pie',hole:.42,marker:{colors:estC}}],
+    {height:300,margin:{t:20,b:10,l:10,r:10},paper_bgcolor:'white'},{responsive:true});
+
+  const top={};
+  dataFiltrada.forEach(r=>{const k=r['Razon Social'];top[k]=(top[k]||0)+(parseFloat(r['Saldo Actual'])||0);});
+  const top10=Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,10);
+  document.querySelector('#tbl-top10 tbody').innerHTML=top10.map((e,i)=>{
+    const r=dataFiltrada.find(r=>r['Razon Social']==e[0]);
+    return `<tr><td>${i+1}</td><td>${e[0]}</td><td>${fmt(e[1])}</td><td>${fmtPct(e[1]/total*100)}</td><td>${badge(r?r['Estado de cartera']:'')}</td></tr>`;
+  }).join('');
+
+  const al=[];
+  if(top10[0]) al.push(`Mayor deudor: <strong>${top10[0][0]}</strong> — ${fmt(top10[0][1])}`);
+  if(cobro>0) al.push(`Cartera Para cobro: ${fmt(cobro)} (${fmtPct(cobro/total*100)})`);
+  document.getElementById('alertas-container').innerHTML=al.map(t=>`<div class="alert danger">🔴 ${t}</div>`).join('');
+}
+
+function renderAging(){
+  const ag={};
+  dataFiltrada.forEach(r=>{const k=r['Intervalo-Actual']||'Otros';ag[k]=(ag[k]||{s:0,n:0});ag[k].s+=(parseFloat(r['Saldo Actual'])||0);ag[k].n++;});
+  const keys=Object.keys(ag);
+  const total=keys.reduce((s,k)=>s+ag[k].s,0);
+  Plotly.newPlot('chart-aging',[{x:keys,y:keys.map(k=>ag[k].s),type:'bar',marker:{color:'#2E86AB'},text:keys.map(k=>fmt(ag[k].s)),textposition:'outside'}],
+    {height:400,margin:{t:20,b:80,l:10,r:10},paper_bgcolor:'white',plot_bgcolor:'white'},{responsive:true});
+  document.querySelector('#tbl-aging tbody').innerHTML=keys.map(k=>
+    `<tr><td>${k}</td><td>${fmt(ag[k].s)}</td><td>${fmtPct(ag[k].s/total*100)}</td><td>${ag[k].n}</td></tr>`).join('');
+}
+
+function renderTipo(){
+  const te={};
+  dataFiltrada.forEach(r=>{const k=r['Tipo De Empresa']||'Sin tipo';if(!te[k])te[k]={s:0,cli:new Set()};te[k].s+=(parseFloat(r['Saldo Actual'])||0);te[k].cli.add(r['Razon Social']);});
+  const keys=Object.keys(te).sort((a,b)=>te[b].s-te[a].s);
+  const vals=keys.map(k=>te[k].s);
+  const total=vals.reduce((a,b)=>a+b,0);
+  Plotly.newPlot('chart-tipo-bar',[{x:vals,y:keys,type:'bar',orientation:'h',marker:{color:'#1B3A6B'},text:vals.map(fmt),textposition:'outside'}],
+    {height:340,margin:{t:20,b:10,l:10,r:140},paper_bgcolor:'white',plot_bgcolor:'white'},{responsive:true});
+  Plotly.newPlot('chart-tipo-pie',[{labels:keys,values:vals,type:'pie',hole:.42}],
+    {height:340,margin:{t:20,b:10,l:10,r:10},paper_bgcolor:'white'},{responsive:true});
+  document.querySelector('#tbl-tipo tbody').innerHTML=keys.map(k=>
+    `<tr><td>${k}</td><td>${fmt(te[k].s)}</td><td>${fmtPct(te[k].s/total*100)}</td><td>${te[k].cli.size}</td></tr>`).join('');
+}
+
+function renderDetalle(){
+  const busq=(document.getElementById('buscador').value||'').toLowerCase();
+  const base=busq?dataFiltrada.filter(r=>
+    (r['Razon Social']||'').toLowerCase().includes(busq)||
+    (r['Estado de cartera']||'').toLowerCase().includes(busq)
+  ):dataFiltrada;
+  const ini=paginaActual*POR_PAG;
+  const pag=base.slice(ini,ini+POR_PAG);
+  document.getElementById('pag-info').textContent=`Pagina ${paginaActual+1} de ${Math.ceil(base.length/POR_PAG)||1} (${base.length.toLocaleString()} registros)`;
+  document.querySelector('#tbl-detalle tbody').innerHTML=pag.map(r=>`<tr>
+    <td>${r['Razon Social']}</td><td>${r['Tipo De Empresa']}</td>
+    <td>${badge(r['Estado de cartera'])}</td><td>${r['Intervalo-Actual']}</td>
+    <td style="text-align:right">${fmt(r['Saldo Actual'])}</td></tr>`).join('');
+}
+
+function cambiarPag(dir){
+  paginaActual=Math.max(0,paginaActual+dir);
+  renderDetalle();
+}
+
+function renderTodo(){
+  renderResumen();
+  renderAging();
+  renderTipo();
+  renderDetalle();
+}
+</script>
+</body>
+</html>
