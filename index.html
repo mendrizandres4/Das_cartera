@@ -257,23 +257,48 @@ function cargarArchivo(event){
       document.getElementById('upload-status').innerHTML =
         'Archivo leido: ' + workbook.SheetNames.length + ' hoja(s) encontrada(s) (' + workbook.SheetNames.join(', ') + '). Buscando datos...';
 
-      // Buscar la hoja con mas datos, no solo la primera
-      let mejorHoja = workbook.SheetNames[0];
+      // Buscar la hoja que contenga las columnas requeridas (no solo la mas grande)
+      const colsRequeridasBusqueda = ['saldo actual','estado de cartera','intervalo'];
+      let mejorHoja = null;
       let mejorConteo = 0;
+      let hojaConMasFilas = workbook.SheetNames[0];
+      let maxFilas = 0;
+      const diagnosticoHojas = [];
+
       workbook.SheetNames.forEach(nombreHoja => {
         const hojaActual = workbook.Sheets[nombreHoja];
-        if(!hojaActual || !hojaActual['!ref']) return;
+        if(!hojaActual || !hojaActual['!ref']) {
+          diagnosticoHojas.push(nombreHoja + ': vacia');
+          return;
+        }
         try {
           const range = XLSX.utils.decode_range(hojaActual['!ref']);
           const filas = range.e.r - range.s.r;
-          if(filas > mejorConteo){
-            mejorConteo = filas;
+
+          if(filas > maxFilas){ maxFilas = filas; hojaConMasFilas = nombreHoja; }
+
+          // Leer solo la primera fila para ver los encabezados sin procesar todo
+          const headerRow = XLSX.utils.sheet_to_json(hojaActual, {header:1, range:0, defval:''})[0] || [];
+          const headersNorm = headerRow.map(h => normalizarTexto(String(h)).toLowerCase());
+          const coincidencias = colsRequeridasBusqueda.filter(req =>
+            headersNorm.some(h => h.includes(req))
+          ).length;
+
+          diagnosticoHojas.push(nombreHoja + ': ' + filas + ' filas, ' + coincidencias + '/3 columnas clave');
+
+          if(coincidencias > mejorConteo){
+            mejorConteo = coincidencias;
             mejorHoja = nombreHoja;
           }
         } catch(rangeErr){
-          // Hoja con rango invalido, se omite
+          diagnosticoHojas.push(nombreHoja + ': error de rango');
         }
       });
+
+      // Si ninguna hoja tuvo coincidencias claras, usar la de mas filas como respaldo
+      if(!mejorHoja || mejorConteo === 0){
+        mejorHoja = hojaConMasFilas;
+      }
 
       const sheet = workbook.Sheets[mejorHoja];
 
@@ -335,7 +360,8 @@ function cargarArchivo(event){
       if(faltantes.length > 0){
         document.getElementById('upload-status').innerHTML =
           '<span style="color:#E63946">Faltan columnas: ' + faltantes.join(', ') + '</span><br>' +
-          '<span style="font-size:.7rem;color:#6C757D">Hoja usada: "' + mejorHoja + '" | Columnas detectadas (' + cols.length + '): ' + cols.join(', ') + '</span>';
+          '<span style="font-size:.7rem;color:#6C757D">Hoja usada: "' + mejorHoja + '" | Columnas detectadas (' + cols.length + '): ' + cols.join(', ') + '</span><br>' +
+          '<span style="font-size:.7rem;color:#854F0B">Diagnostico de todas las hojas: ' + diagnosticoHojas.join(' | ') + '</span>';
         return;
       }
 
