@@ -241,7 +241,7 @@ function cargarArchivo(event){
 
       let workbook;
       try {
-        workbook = XLSX.read(data, {type:'array', cellDates:false, sheetStubs:false});
+        workbook = XLSX.read(data, {type:'array', cellDates:false, sheetStubs:true, cellText:true});
       } catch(parseErr){
         document.getElementById('upload-status').innerHTML =
           '<span style="color:#E63946">No se pudo interpretar el archivo como Excel: ' + parseErr.message + '</span>';
@@ -267,8 +267,29 @@ function cargarArchivo(event){
 
       workbook.SheetNames.forEach(nombreHoja => {
         const hojaActual = workbook.Sheets[nombreHoja];
-        if(!hojaActual || !hojaActual['!ref']) {
-          diagnosticoHojas.push(nombreHoja + ': vacia');
+        if(!hojaActual){
+          diagnosticoHojas.push(nombreHoja + ': hoja no accesible (undefined)');
+          return;
+        }
+        if(!hojaActual['!ref']){
+          // Intentar leer directamente aunque no tenga !ref definido
+          try {
+            const filasDirectas = XLSX.utils.sheet_to_json(hojaActual, {header:1, defval:''});
+            if(filasDirectas && filasDirectas.length > 0){
+              diagnosticoHojas.push(nombreHoja + ': sin !ref pero ' + filasDirectas.length + ' filas leibles directamente');
+              const headersNorm = (filasDirectas[0]||[]).map(h => normalizarTexto(String(h)).toLowerCase());
+              const coincidencias = colsRequeridasBusqueda.filter(req => headersNorm.some(h => h.includes(req))).length;
+              if(coincidencias > mejorConteo){
+                mejorConteo = coincidencias;
+                mejorHoja = nombreHoja;
+              }
+              if(filasDirectas.length > maxFilas){ maxFilas = filasDirectas.length; hojaConMasFilas = nombreHoja; }
+            } else {
+              diagnosticoHojas.push(nombreHoja + ': vacia (sin !ref y sin filas)');
+            }
+          } catch(e2){
+            diagnosticoHojas.push(nombreHoja + ': vacia (sin !ref, error al leer directo: ' + e2.message + ')');
+          }
           return;
         }
         try {
@@ -277,21 +298,20 @@ function cargarArchivo(event){
 
           if(filas > maxFilas){ maxFilas = filas; hojaConMasFilas = nombreHoja; }
 
-          // Leer solo la primera fila para ver los encabezados sin procesar todo
           const headerRow = XLSX.utils.sheet_to_json(hojaActual, {header:1, range:0, defval:''})[0] || [];
           const headersNorm = headerRow.map(h => normalizarTexto(String(h)).toLowerCase());
           const coincidencias = colsRequeridasBusqueda.filter(req =>
             headersNorm.some(h => h.includes(req))
           ).length;
 
-          diagnosticoHojas.push(nombreHoja + ': ' + filas + ' filas, ' + coincidencias + '/3 columnas clave');
+          diagnosticoHojas.push(nombreHoja + ': ref=' + hojaActual['!ref'] + ', ' + filas + ' filas, ' + coincidencias + '/3 columnas clave');
 
           if(coincidencias > mejorConteo){
             mejorConteo = coincidencias;
             mejorHoja = nombreHoja;
           }
         } catch(rangeErr){
-          diagnosticoHojas.push(nombreHoja + ': error de rango');
+          diagnosticoHojas.push(nombreHoja + ': error de rango (' + rangeErr.message + ')');
         }
       });
 
@@ -308,12 +328,7 @@ function cargarArchivo(event){
         return;
       }
 
-      if(!sheet['!ref']){
-        document.getElementById('upload-status').innerHTML =
-          '<span style="color:#E63946">La hoja "' + mejorHoja + '" no tiene rango de datos (!ref). Puede estar completamente vacia o protegida.</span>';
-        return;
-      }
-
+      // Intentar leer la hoja aunque no tenga !ref definido
       const json = XLSX.utils.sheet_to_json(sheet, {raw:false, defval:''});
 
       if(!json || json.length === 0){
